@@ -29,9 +29,11 @@ label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
 #m{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end;justify-content:center;z-index:5}
 #m.on{display:flex}
 #m>div{background:var(--bg);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));max-height:90%;overflow:auto}
+#lk{position:fixed;inset:0;background:var(--bg);z-index:20;display:none;align-items:center;justify-content:center;padding:20px}#lk.on{display:flex}#lk>div{width:100%;max-width:320px;text-align:center}#lk input{text-align:center;letter-spacing:6px;font-size:22px;margin:8px 0}
+.hd{display:flex;justify-content:space-between;align-items:center}.hd button{border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;padding:6px 10px;font-size:16px}
 .in{color:var(--grn)}.out{color:var(--red)}.empty{text-align:center;color:var(--mut);padding:30px 10px}
 </style></head><body><div class="w">
-<h1>📦 Stock Manager</h1>
+<h1 class="hd"><span>📦 Stock Manager</span><button id="lb" onclick="lock()" style="display:none">🔒</button></h1>
 <div id="st" class="mut" style="margin:-6px 0 10px"></div>
 <div id="sum"></div>
 <div class="tabs"><button id="t1" onclick="tab='stock';render()">Stock</button><button id="t2" onclick="tab='log';render()">History</button></div>
@@ -39,6 +41,7 @@ label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
 </div>
 <button class="fab" onclick="openItem()">+ Add item</button>
 <div id="m"><div id="mb"></div></div>
+<div id="lk"><div id="lkb"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
 let S={items:[],log:[]},tab='stock',q='';
@@ -60,7 +63,37 @@ async function load(){
 }
 function init(){
  if(SUPABASE_URL.startsWith('PASTE')||!window.supabase){$('st').textContent='Setup pending: add Supabase URL and key';return}
- DB=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);load();setInterval(()=>{if(!$('m').classList.contains('on'))load()},15000);
+ DB=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);gate();
+}
+const sha=async p=>{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('rmstock:'+p));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('')};
+let PINH=null,bad=0;
+function lk(h){$('lkb').innerHTML=h;$('lk').classList.add('on')}
+function unlock(){$('lk').classList.remove('on');$('lb').style.display='';load();setInterval(()=>{if(!$('m').classList.contains('on')&&!$('lk').classList.contains('on'))load()},15000)}
+function lock(){try{localStorage.removeItem('rm_pin')}catch(e){}location.reload()}
+async function gate(){
+ const r=await DB.from('settings').select('v').eq('k','pin').maybeSingle();
+ if(r.error){lk('<div class="nm" style="font-size:18px">Setup needed</div><p class="mut">Run the settings SQL in Supabase, then reload this page.</p>');return}
+ PINH=r.data?r.data.v:null;
+ if(!PINH){lk('<div style="font-size:40px">🔒</div><div class="nm" style="font-size:18px">Set a PIN</div><p class="mut">Choose 4 to 8 digits. Keep it secret.</p><input id="p1" type="password" inputmode="numeric" maxlength="8" placeholder="PIN"><input id="p2" type="password" inputmode="numeric" maxlength="8" placeholder="Confirm PIN"><div id="pe" class="out mut"></div><button class="btn p" style="width:100%;margin-top:8px" onclick="setPin()">Save PIN</button>');return}
+ let saved=null;try{saved=localStorage.getItem('rm_pin')}catch(e){}
+ if(saved===PINH){unlock();return}
+ lk('<div style="font-size:40px">🔒</div><div class="nm" style="font-size:18px">RM Stock</div><p class="mut">Enter PIN</p><input id="p1" type="password" inputmode="numeric" maxlength="8" placeholder="PIN"><div id="pe" class="out mut"></div><button class="btn p" id="pb" style="width:100%;margin-top:8px" onclick="chk()">Unlock</button>');
+ $('p1').addEventListener('keydown',e=>{if(e.key==='Enter')chk()});
+}
+async function setPin(){
+ const a=$('p1').value,b=$('p2').value;
+ if(!/^\d{4,8}$/.test(a)){$('pe').textContent='PIN must be 4 to 8 digits.';return}
+ if(a!==b){$('pe').textContent='PINs do not match.';return}
+ const h=await sha(a),r=await DB.from('settings').upsert({k:'pin',v:h});
+ if(r.error){$('pe').textContent=r.error.message;return}
+ try{localStorage.setItem('rm_pin',h)}catch(e){}
+ PINH=h;unlock();
+}
+async function chk(){
+ const h=await sha($('p1').value);
+ if(h===PINH){try{localStorage.setItem('rm_pin',h)}catch(e){}unlock();return}
+ bad++;$('pe').textContent='Wrong PIN.';$('p1').value='';
+ $('pb').disabled=true;setTimeout(()=>{$('pb').disabled=false},Math.min(bad,5)*1000);
 }
 const n=v=>Math.max(0,parseFloat(v)||0);
 function render(){
