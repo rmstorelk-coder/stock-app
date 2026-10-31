@@ -107,7 +107,7 @@ function render(){
  $('t1').className=tab==='stock'?'on':'';$('t2').className=tab==='log'?'on':'';
  let h='';
  if(tab==='stock'){
-  h='<div id="ch" class="chips"></div><input id="s" placeholder="Search model (e.g. OP, A6X)…" value="'+esc(q)+'" oninput="q=this.value;list()"><div id="l"></div>';
+  h='<div id="ch" class="chips"></div><input id="s" autocomplete="off" placeholder="Search model (e.g. OP, A6X)…" value="'+esc(q)+'" oninput="q=this.value;list()"><div id="l"></div>';
   if(!$('s'))$('c').innerHTML=h;chips();list();
  }else{
   h=S.log.length?S.log.slice(0,100).map(l=>`<div class="card row"><div><div class="nm">${esc(l.name)}</div><div class="mut">${new Date(l.t).toLocaleString()}${l.note?' · '+esc(l.note):''}</div></div><b class="${l.d>0?'in':'out'}">${l.d>0?'+':''}${l.d}</b></div>`).join(''):'<div class="empty">No movements yet</div>';
@@ -121,6 +121,7 @@ function chips(){
 function setCat(c){cat=c;chips();list()}
 function card(i){return `<div class="card"><div class="row"><div><div class="nm">${esc(i.name)}</div><div class="mut">${esc(i.cat||'No category')} · Min ${i.min} · Price ${i.price}</div></div><span class="q ${i.qty<=i.min?'low':''}">${i.qty}</span></div>${i.qty<=i.min?'<div class="mut out" style="margin-top:6px">⚠ Low stock</div>':''}<div class="acts"><button onclick="openMove('${i.id}',1)">+ In</button><button onclick="openMove('${i.id}',-1)">− Out</button><button onclick="openItem('${i.id}')">Edit</button></div></div>`}
 function list(){
+ if($('s'))q=$('s').value;
  const k=lc(q),terms=k.split(/\s+/).filter(Boolean);
  const match=i=>{if(!terms.length)return true;const txt=lc(i.name+' '+(i.cat||'')),w=txt.split(/[^a-z0-9]+/).filter(Boolean);return terms.every(t=>w.some(x=>x.startsWith(t))||(t.length>2&&txt.includes(t)))};
  const a=S.items.filter(i=>match(i)&&(!cat||lc(i.cat)===lc(cat))).sort((x,y)=>(y.qty<=y.min)-(x.qty<=x.min)||x.name.localeCompare(y.name));
