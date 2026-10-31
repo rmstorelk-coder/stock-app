@@ -31,6 +31,8 @@ label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
 #m>div{background:var(--bg);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));max-height:90%;overflow:auto}
 #lk{position:fixed;inset:0;background:var(--bg);z-index:20;display:none;align-items:center;justify-content:center;padding:20px}#lk.on{display:flex}#lk>div{width:100%;max-width:320px;text-align:center}#lk input{text-align:center;letter-spacing:6px;font-size:22px;margin:8px 0}
 .hd{display:flex;justify-content:space-between;align-items:center}.hd button{border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;padding:6px 10px;font-size:16px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:4px}.chips button{flex:none;padding:7px 12px;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:20px;font-size:13px;white-space:nowrap}.chips button.on{background:var(--ac);color:var(--acx);border-color:var(--ac)}
+.gh{font-weight:700;margin:16px 2px 0;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
 .in{color:var(--grn)}.out{color:var(--red)}.empty{text-align:center;color:var(--mut);padding:30px 10px}
 </style></head><body><div class="w">
 <h1 class="hd"><span>📦 Stock Manager</span><button id="lb" onclick="lock()" style="display:none">🔒</button></h1>
@@ -44,7 +46,10 @@ label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
 <div id="lk"><div id="lkb"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
-let S={items:[],log:[]},tab='stock',q='';
+let S={items:[],log:[]},tab='stock',q='',cat='';
+const DEF_CATS=['Display','Battery','KeyPad phone LCD','IPHONE BackPanel'];
+const lc=x=>(x||'').trim().toLowerCase();
+function cats(){const seen=new Set(),out=[];[...DEF_CATS,...S.items.map(i=>(i.cat||'').trim())].forEach(c=>{if(c&&!seen.has(lc(c))){seen.add(lc(c));out.push(c)}});return out}
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
@@ -102,26 +107,39 @@ function render(){
  $('t1').className=tab==='stock'?'on':'';$('t2').className=tab==='log'?'on':'';
  let h='';
  if(tab==='stock'){
-  h='<input id="s" placeholder="Search item or category…" value="'+esc(q)+'" oninput="q=this.value;list()"><div id="l"></div>';
-  if(!$('s'))$('c').innerHTML=h;list();
+  h='<div id="ch" class="chips"></div><input id="s" placeholder="Search model (e.g. OP, A6X)…" value="'+esc(q)+'" oninput="q=this.value;list()"><div id="l"></div>';
+  if(!$('s'))$('c').innerHTML=h;chips();list();
  }else{
   h=S.log.length?S.log.slice(0,100).map(l=>`<div class="card row"><div><div class="nm">${esc(l.name)}</div><div class="mut">${new Date(l.t).toLocaleString()}${l.note?' · '+esc(l.note):''}</div></div><b class="${l.d>0?'in':'out'}">${l.d>0?'+':''}${l.d}</b></div>`).join(''):'<div class="empty">No movements yet</div>';
   $('c').innerHTML=h;
  }
 }
+function chips(){
+ const cnt=k=>S.items.filter(i=>lc(i.cat)===lc(k)).length;
+ $('ch').innerHTML=`<button class="${cat?'':'on'}" onclick="setCat('')">All (${S.items.length})</button>`+cats().map(c=>`<button class="${lc(cat)===lc(c)?'on':''}" data-c="${esc(c)}" onclick="setCat(this.dataset.c)">${esc(c)} (${cnt(c)})</button>`).join('');
+}
+function setCat(c){cat=c;chips();list()}
+function card(i){return `<div class="card"><div class="row"><div><div class="nm">${esc(i.name)}</div><div class="mut">${esc(i.cat||'No category')} · Min ${i.min} · Price ${i.price}</div></div><span class="q ${i.qty<=i.min?'low':''}">${i.qty}</span></div>${i.qty<=i.min?'<div class="mut out" style="margin-top:6px">⚠ Low stock</div>':''}<div class="acts"><button onclick="openMove('${i.id}',1)">+ In</button><button onclick="openMove('${i.id}',-1)">− Out</button><button onclick="openItem('${i.id}')">Edit</button></div></div>`}
 function list(){
- const k=q.toLowerCase();
- const a=S.items.filter(i=>(i.name+' '+i.cat).toLowerCase().includes(k)).sort((x,y)=>(y.qty<=y.min)-(x.qty<=x.min)||x.name.localeCompare(y.name));
- $('l').innerHTML=a.length?a.map(i=>`<div class="card"><div class="row"><div><div class="nm">${esc(i.name)}</div><div class="mut">${esc(i.cat||'No category')} · Min ${i.min} · Price ${i.price}</div></div><span class="q ${i.qty<=i.min?'low':''}">${i.qty}</span></div>${i.qty<=i.min?'<div class="mut out" style="margin-top:6px">⚠ Low stock</div>':''}<div class="acts"><button onclick="openMove('${i.id}',1)">+ In</button><button onclick="openMove('${i.id}',-1)">− Out</button><button onclick="openItem('${i.id}')">Edit</button></div></div>`).join(''):'<div class="empty">'+(S.items.length?'No match':'No items yet. Tap “Add item”.')+'</div>';
+ const k=lc(q),terms=k.split(/\s+/).filter(Boolean);
+ const match=i=>{if(!terms.length)return true;const txt=lc(i.name+' '+(i.cat||'')),w=txt.split(/[^a-z0-9]+/).filter(Boolean);return terms.every(t=>w.some(x=>x.startsWith(t))||(t.length>2&&txt.includes(t)))};
+ const a=S.items.filter(i=>match(i)&&(!cat||lc(i.cat)===lc(cat))).sort((x,y)=>(y.qty<=y.min)-(x.qty<=x.min)||x.name.localeCompare(y.name));
+ if(!a.length){$('l').innerHTML='<div class="empty">'+(S.items.length?'No match':'No items yet. Tap “Add item”.')+'</div>';return}
+ if(cat){$('l').innerHTML=a.map(card).join('');return}
+ const order=[...cats(),''];let h='';
+ order.forEach(c=>{const g=a.filter(i=>lc(i.cat)===lc(c));if(g.length)h+=`<div class="gh">${esc(c||'No category')} (${g.length})</div>`+g.map(card).join('')});
+ $('l').innerHTML=h;
 }
 function show(h){$('mb').innerHTML=h;$('m').classList.add('on')}
 function hide(){$('m').classList.remove('on')}
 $('m').addEventListener('click',e=>{if(e.target===$('m'))hide()});
+function catSel(){$('f2n').style.display=$('f2').value==='__new'?'':'none'}
 function openItem(id){
  const i=S.items.find(x=>x.id===id)||{name:'',cat:'',qty:0,min:5,price:0};
+ const cs=cats(),cur=lc(id?i.cat:cat);
  show(`<div class="nm" style="font-size:17px">${id?'Edit item':'New item'}</div>
  <label>Item name</label><input id="f1" value="${esc(i.name)}">
- <label>Category</label><input id="f2" value="${esc(i.cat)}" placeholder="e.g. Spare parts">
+ <label>Category</label><select id="f2" onchange="catSel()">${cs.map(c=>`<option value="${esc(c)}" ${lc(c)===cur?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new">+ New category…</option></select><input id="f2n" placeholder="New category name" style="display:none;margin-top:6px">
  ${id?'':`<label>Opening quantity</label><input id="f3" type="number" inputmode="decimal" value="0">`}
  <label>Low-stock level (alert at or below)</label><input id="f4" type="number" inputmode="decimal" value="${i.min}">
  <label>Unit price</label><input id="f5" type="number" inputmode="decimal" value="${i.price}">
@@ -129,7 +147,8 @@ function openItem(id){
 }
 function saveItem(id){
  const name=$('f1').value.trim();if(!name){$('f1').focus();return}
- const d={name,cat:$('f2').value.trim(),min:n($('f4').value),price:n($('f5').value)};
+ let c=$('f2').value;if(c==='__new')c=$('f2n').value.trim();if(!c){$('f2n').style.display='';$('f2n').focus();return}
+ const d={name,cat:c,min:n($('f4').value),price:n($('f5').value)};
  if(id){const it=S.items.find(x=>x.id===id);Object.assign(it,d);put(it)}
  else{const qty=n($('f3').value),it={id:uid(),qty,...d};S.items.push(it);put(it);if(qty)addLog({t:Date.now(),name,d:qty,note:'Opening stock'})}
  hide();render();
