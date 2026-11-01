@@ -17,7 +17,7 @@ h1{font-size:20px;margin:6px 0 12px}
 .tabs button.on{background:var(--ac);color:var(--acx);border-color:var(--ac)}
 input,select{width:100%;padding:11px;border:1px solid var(--bd);border-radius:10px;background:var(--card);color:var(--tx);font-size:16px}
 label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
-.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-top:8px}
+.card{content-visibility:auto;contain-intrinsic-size:auto 130px;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-top:8px}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .nm{font-weight:600}.mut{color:var(--mut);font-size:13px}
 .q{font-size:20px;font-weight:700;padding:2px 10px;border-radius:8px;background:var(--grnbg);color:var(--grn)}
@@ -31,11 +31,12 @@ label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
 #m>div{background:var(--bg);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px));max-height:90%;overflow:auto}
 #lk{position:fixed;inset:0;background:var(--bg);z-index:20;display:none;align-items:center;justify-content:center;padding:20px}#lk.on{display:flex}#lk>div{width:100%;max-width:320px;text-align:center}#lk input{text-align:center;letter-spacing:6px;font-size:22px;margin:8px 0}
 .hd{display:flex;justify-content:space-between;align-items:center}.hd button{border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;padding:6px 10px;font-size:16px}
+.hb{display:flex;gap:6px}
 .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:4px}.chips button{flex:none;padding:7px 12px;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:20px;font-size:13px;white-space:nowrap}.chips button.on{background:var(--ac);color:var(--acx);border-color:var(--ac)}
 .gh{font-weight:700;margin:16px 2px 0;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
 .in{color:var(--grn)}.out{color:var(--red)}.empty{text-align:center;color:var(--mut);padding:30px 10px}
 </style></head><body><div class="w">
-<h1 class="hd"><span>📦 Stock Manager</span><button id="lb" onclick="lock()" style="display:none">🔒</button></h1>
+<h1 class="hd"><span>📦 Stock Manager</span><span class="hb"><button id="ib" onclick="openImport()" style="display:none">⬆ Import</button><button id="lb" onclick="lock()" style="display:none">🔒</button></span></h1>
 <div id="st" class="mut" style="margin:-6px 0 10px"></div>
 <div id="sum"></div>
 <div class="tabs"><button id="t1" onclick="tab='stock';render()">Stock</button><button id="t2" onclick="tab='log';render()">History</button></div>
@@ -46,10 +47,14 @@ label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
 <div id="lk"><div id="lkb"></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
-let S={items:[],log:[]},tab='stock',q='',cat='';
-const DEF_CATS=['Display','Battery','KeyPad phone LCD','IPHONE BackPanel'];
-const lc=x=>(x||'').trim().toLowerCase();
-function cats(){const seen=new Set(),out=[];[...DEF_CATS,...S.items.map(i=>(i.cat||'').trim())].forEach(c=>{if(c&&!seen.has(lc(c))){seen.add(lc(c));out.push(c)}});return out}
+let S={items:[],log:[]},tab='stock',q='',cat='',shown=30,tm,lastUpd=0,lastFull=0;
+const tc=new WeakMap();
+const lc=x=>(x||'').toString().trim().toLowerCase();
+function tx(i){let r=tc.get(i);if(!r){const t=lc(i.name+' '+(i.cat||'')+' '+(i.brand||'')+' '+(i.code||''));r={t,w:t.split(/[^a-z0-9]+/).filter(Boolean),k:lc(i.name)};tc.set(i,r)}return r}
+const isLow=i=>i.min>0&&i.qty<=i.min;
+function sl(){clearTimeout(tm);tm=setTimeout(list,150)}
+function catInfo(){const m=new Map();S.items.forEach(i=>{const c=(i.cat||'').toString().trim();if(!c)return;const k=lc(c),e=m.get(k);if(e)e.n++;else m.set(k,{c,n:1})});const a=[...m.values()].sort((x,y)=>y.n-x.n||x.c.localeCompare(y.c));return a.length?a:[{c:'Display',n:0},{c:'Battery',n:0}]}
+const cats=()=>catInfo().map(e=>e.c);
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
@@ -57,14 +62,35 @@ const SUPABASE_URL='https://znsquyzhenvjcfrxfhkl.supabase.co',SUPABASE_KEY='eyJh
 let DB=null;
 const err=e=>{$('st').textContent='⚠ '+((e&&e.message)||'Save failed')};
 const ok=r=>{if(r&&r.error)err(r.error);return r};
-function put(it){DB.from('items').upsert(it).then(ok)}
+function put(it){it.upd=Date.now();DB.from('items').upsert(it).then(ok)}
 function addLog(l){DB.from('log').insert(l).then(ok)}
 function rm(id){S.items=S.items.filter(x=>x.id!==id);DB.from('items').delete().eq('id',id).then(ok);hide();render()}
-async function load(){
- const a=await DB.from('items').select('*'),b=await DB.from('log').select('*').order('t',{ascending:false}).limit(100);
+const norm=i=>({...i,qty:+i.qty||0,min:+i.min||0,price:+i.price||0,cost:+i.cost||0,upd:+i.upd||0,brand:i.brand||'',code:i.code||''});
+async function fetchItems(since){
+ let out=[],from=0;
+ for(;;){
+  let qy=DB.from('items').select('*');
+  if(since!=null)qy=qy.gt('upd',since);
+  const r=await qy.order('id').range(from,from+999);
+  if(r.error)return{error:r.error};
+  out=out.concat(r.data);
+  if(r.data.length<1000)break;
+  from+=1000;
+ }
+ return{data:out};
+}
+function saveCache(){try{localStorage.setItem('rm_cache',JSON.stringify({t:lastFull,items:S.items}))}catch(e){}}
+async function load(force){
+ const full=force||!lastFull||Date.now()-lastFull>600000,t0=Date.now();
+ const since=full?null:(lastUpd?lastUpd-20000:t0);
+ if(full&&!S.items.length)$('st').textContent='Loading items…';
+ const a=await fetchItems(since),b=await DB.from('log').select('*').order('t',{ascending:false}).limit(100);
  if(a.error||b.error){err(a.error||b.error);return}
- S.items=a.data.map(i=>({...i,qty:+i.qty,min:+i.min,price:+i.price}));S.log=b.data;
- $('st').textContent='☁ Synced (cloud)';render();
+ if(full){S.items=a.data.map(norm);lastFull=t0}
+ else if(a.data.length){const m=new Map(S.items.map(i=>[i.id,i]));a.data.forEach(r=>m.set(r.id,norm(r)));S.items=[...m.values()]}
+ S.log=b.data;lastUpd=S.items.reduce((m,i)=>Math.max(m,i.upd||0),0);
+ if(full||a.data.length)saveCache();
+ $('st').textContent='☁ Synced · '+S.items.length+' items';render();
 }
 function init(){
  if(SUPABASE_URL.startsWith('PASTE')||!window.supabase){$('st').textContent='Setup pending: add Supabase URL and key';return}
@@ -73,7 +99,11 @@ function init(){
 const sha=async p=>{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('rmstock:'+p));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,'0')).join('')};
 let PINH=null,bad=0;
 function lk(h){$('lkb').innerHTML=h;$('lk').classList.add('on')}
-function unlock(){$('lk').classList.remove('on');$('lb').style.display='';load();setInterval(()=>{if(!$('m').classList.contains('on')&&!$('lk').classList.contains('on'))load()},15000)}
+function unlock(){
+ $('lk').classList.remove('on');$('lb').style.display='';$('ib').style.display='';
+ try{const c=JSON.parse(localStorage.getItem('rm_cache')||'null');if(c&&c.items&&c.items.length){S.items=c.items;lastFull=c.t||0;lastUpd=S.items.reduce((m,i)=>Math.max(m,i.upd||0),0);render()}}catch(e){}
+ load();setInterval(()=>{if(!$('m').classList.contains('on')&&!$('lk').classList.contains('on'))load()},20000);
+}
 function lock(){try{localStorage.removeItem('rm_pin')}catch(e){}location.reload()}
 async function gate(){
  const r=await DB.from('settings').select('v').eq('k','pin').maybeSingle();
@@ -101,13 +131,49 @@ async function chk(){
  $('pb').disabled=true;setTimeout(()=>{$('pb').disabled=false},Math.min(bad,5)*1000);
 }
 const n=v=>Math.max(0,parseFloat(v)||0);
+function loadXlsx(){return new Promise((res,rej)=>{if(window.XLSX)return res();const t=document.createElement('script');t.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';t.onload=res;t.onerror=()=>rej(new Error('Could not load Excel reader. Check internet.'));document.head.appendChild(t)})}
+const canon=a=>{const c={};a.forEach(v=>{if(!v)return;const k=v.toLowerCase();c[k]=c[k]||{};c[k][v]=(c[k][v]||0)+1});const o={};for(const k in c)o[k]=Object.entries(c[k]).sort((x,y)=>y[1]-x[1])[0][0];return o};
+function openImport(){
+ const old=S.items.filter(i=>!String(i.id).startsWith('im')&&!i.qty&&!i.cost&&!i.price).length;
+ show(`<div class="nm" style="font-size:17px">Import Excel</div><p class="mut">Choose your item list (.xlsx). Columns needed: Alias, Name, Brand, Group Name, Purc. Price, Sale Price. Quantity starts at 0. Importing again is safe: quantities are kept.</p><input id="xf" type="file" accept=".xlsx,.xls,.csv"><label style="display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--tx);font-size:14px"><input id="xc" type="checkbox" checked style="width:auto;padding:0"> Remove ${old} old items with qty 0 and no price</label><div id="xs" class="mut" style="margin-top:8px"></div><div class="acts" style="margin-top:12px"><button class="btn" onclick="hide()">Close</button><button class="btn p" id="xb" onclick="doImport()">Import</button></div>`);
+}
+async function doImport(){
+ const f=$('xf').files[0];if(!f){$('xs').textContent='Choose a file first.';return}
+ $('xb').disabled=true;$('xs').textContent='Reading file…';
+ try{
+  await loadXlsx();
+  const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+  const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+  const hd=(rows[0]||[]).map(h=>String(h).trim().toLowerCase());
+  const ix=k=>hd.findIndex(h=>h.startsWith(k));
+  const c={alias:ix('alias'),name:ix('name'),brand:ix('brand'),grp:ix('group'),purc:ix('purc'),sale:ix('sale')};
+  if(c.name<0||c.grp<0||c.purc<0||c.sale<0){$('xs').textContent='Columns not found. Need: Name, Group Name, Purc. Price, Sale Price.';$('xb').disabled=false;return}
+  const g=(w,k)=>c[k]<0||w[c[k]]==null?'':String(w[c[k]]).trim();
+  const raw=[];
+  for(let r=1;r<rows.length;r++){const w=rows[r],o={alias:g(w,'alias'),name:g(w,'name'),brand:g(w,'brand'),grp:g(w,'grp'),purc:parseFloat(w[c.purc])||0,sale:parseFloat(w[c.sale])||0,n:r};if(!o.name&&!o.alias&&!o.grp)continue;raw.push(o)}
+  if(!raw.length){$('xs').textContent='No items found in file.';$('xb').disabled=false;return}
+  const cg=canon(raw.map(o=>o.grp)),cb=canon(raw.map(o=>o.brand)),ex=new Map(S.items.map(i=>[i.id,i])),now=Date.now();
+  const recs=raw.map(o=>{const id='im'+o.n,e=ex.get(id);return{id,name:(o.name||o.alias||'Unnamed').slice(0,120),cat:cg[o.grp.toLowerCase()]||o.grp,brand:cb[o.brand.toLowerCase()]||o.brand,code:o.alias.slice(0,60),qty:e?e.qty:0,min:e?e.min:0,cost:o.purc,price:o.sale,upd:now}});
+  for(let k=0;k<recs.length;k+=500){
+   $('xs').textContent='Uploading '+Math.min(k+500,recs.length)+' / '+recs.length+'…';
+   const r=await DB.from('items').upsert(recs.slice(k,k+500));
+   if(r.error){$('xs').textContent='⚠ '+r.error.message;$('xb').disabled=false;return}
+  }
+  if($('xc').checked){
+   const ids=S.items.filter(i=>!String(i.id).startsWith('im')&&!i.qty&&!i.cost&&!i.price).map(i=>i.id);
+   for(let k=0;k<ids.length;k+=100)await DB.from('items').delete().in('id',ids.slice(k,k+100));
+  }
+  $('xs').textContent='Done. Loading…';
+  await load(true);hide();
+ }catch(e){$('xs').textContent='⚠ '+(e.message||e);$('xb').disabled=false}
+}
 function render(){
- const it=S.items,low=it.filter(i=>i.qty<=i.min).length,val=it.reduce((a,i)=>a+i.qty*i.price,0);
- $('sum').innerHTML=`<div><b>${it.length}</b><span>Items</span></div><div class="${low?'warn':''}"><b>${low}</b><span>Low stock</span></div><div><b>${Math.round(val).toLocaleString()}</b><span>Stock value</span></div>`;
+ const it=S.items,low=it.filter(isLow).length,val=it.reduce((a,i)=>a+i.qty*i.cost,0);
+ $('sum').innerHTML=`<div><b>${it.length}</b><span>Items</span></div><div class="${low?'warn':''}"><b>${low}</b><span>Low stock</span></div><div><b>${Math.round(val).toLocaleString()}</b><span>Value (cost)</span></div>`;
  $('t1').className=tab==='stock'?'on':'';$('t2').className=tab==='log'?'on':'';
  let h='';
  if(tab==='stock'){
-  h='<div id="ch" class="chips"></div><input id="s" autocomplete="off" placeholder="Search model (e.g. OP, A6X)…" value="'+esc(q)+'" oninput="q=this.value;list()"><div id="l"></div>';
+  h='<div id="ch" class="chips"></div><input id="s" autocomplete="off" placeholder="Search model (e.g. OP, A6X)…" value="'+esc(q)+'" oninput="shown=30;sl()"><div id="l"></div>';
   if(!$('s'))$('c').innerHTML=h;chips();list();
  }else{
   h=S.log.length?S.log.slice(0,100).map(l=>`<div class="card row"><div><div class="nm">${esc(l.name)}</div><div class="mut">${new Date(l.t).toLocaleString()}${l.note?' · '+esc(l.note):''}</div></div><b class="${l.d>0?'in':'out'}">${l.d>0?'+':''}${l.d}</b></div>`).join(''):'<div class="empty">No movements yet</div>';
@@ -115,42 +181,43 @@ function render(){
  }
 }
 function chips(){
- const cnt=k=>S.items.filter(i=>lc(i.cat)===lc(k)).length;
- $('ch').innerHTML=`<button class="${cat?'':'on'}" onclick="setCat('')">All (${S.items.length})</button>`+cats().map(c=>`<button class="${lc(cat)===lc(c)?'on':''}" data-c="${esc(c)}" onclick="setCat(this.dataset.c)">${esc(c)} (${cnt(c)})</button>`).join('');
+ const info=catInfo();
+ $('ch').innerHTML=`<button class="${cat?'':'on'}" onclick="setCat('')">All (${S.items.length})</button>`+info.map(e=>`<button class="${lc(cat)===lc(e.c)?'on':''}" data-c="${esc(e.c)}" onclick="setCat(this.dataset.c)">${esc(e.c)} (${e.n})</button>`).join('');
 }
-function setCat(c){cat=c;chips();list()}
-function card(i){return `<div class="card"><div class="row"><div><div class="nm">${esc(i.name)}</div><div class="mut">${esc(i.cat||'No category')} · Min ${i.min} · Price ${i.price}</div></div><span class="q ${i.qty<=i.min?'low':''}">${i.qty}</span></div>${i.qty<=i.min?'<div class="mut out" style="margin-top:6px">⚠ Low stock</div>':''}<div class="acts"><button onclick="openMove('${i.id}',1)">+ In</button><button onclick="openMove('${i.id}',-1)">− Out</button><button onclick="openItem('${i.id}')">Edit</button></div></div>`}
+function setCat(c){cat=c;shown=30;chips();list()}
+function card(i){const low=isLow(i);return `<div class="card"><div class="row"><div><div class="nm">${esc(i.name)}</div><div class="mut">${esc(i.cat||'No category')}${i.brand?' · '+esc(i.brand):''}${i.code?' · '+esc(i.code):''}</div><div class="mut">Cost ${i.cost} · Sale ${i.price}${i.min>0?' · Alert ≤ '+i.min:''}</div></div><span class="q ${low?'low':''}">${i.qty}</span></div>${low?'<div class="mut out" style="margin-top:6px">⚠ Low stock</div>':''}<div class="acts"><button onclick="openMove('${i.id}',1)">+ In</button><button onclick="openMove('${i.id}',-1)">− Out</button><button onclick="openItem('${i.id}')">Edit</button></div></div>`}
 function list(){
  if($('s'))q=$('s').value;
- const k=lc(q),terms=k.split(/\s+/).filter(Boolean);
- const match=i=>{if(!terms.length)return true;const txt=lc(i.name+' '+(i.cat||'')),w=txt.split(/[^a-z0-9]+/).filter(Boolean);return terms.every(t=>w.some(x=>x.startsWith(t))||(t.length>2&&txt.includes(t)))};
- const a=S.items.filter(i=>match(i)&&(!cat||lc(i.cat)===lc(cat))).sort((x,y)=>(y.qty<=y.min)-(x.qty<=x.min)||x.name.localeCompare(y.name));
- if(!a.length){$('l').innerHTML='<div class="empty">'+(S.items.length?'No match':'No items yet. Tap “Add item”.')+'</div>';return}
- if(cat){$('l').innerHTML=a.map(card).join('');return}
- const order=[...cats(),''];let h='';
- order.forEach(c=>{const g=a.filter(i=>lc(i.cat)===lc(c));if(g.length)h+=`<div class="gh">${esc(c||'No category')} (${g.length})</div>`+g.map(card).join('')});
- $('l').innerHTML=h;
+ const terms=lc(q).split(/\s+/).filter(Boolean);
+ const match=i=>{if(!terms.length)return true;const r=tx(i);return terms.every(t=>r.w.some(x=>x.startsWith(t))||(t.length>2&&r.t.includes(t)))};
+ const a=S.items.filter(i=>match(i)&&(!cat||lc(i.cat)===lc(cat))).sort((x,y)=>isLow(y)-isLow(x)||(tx(x).k<tx(y).k?-1:tx(x).k>tx(y).k?1:0));
+ if(!a.length){$('l').innerHTML='<div class="empty">'+(S.items.length?'No match':'No items yet. Tap “Add item” or “Import”.')+'</div>';return}
+ const v=a.slice(0,shown),more=a.length>shown?`<button class="btn" style="width:100%;margin-top:12px;flex:none" onclick="shown+=30;list()">Show more (${a.length-shown} left)</button>`:'';
+ $('l').innerHTML=`<div class="mut" style="margin:10px 2px 0">${a.length} items</div>`+v.map(card).join('')+more;
 }
 function show(h){$('mb').innerHTML=h;$('m').classList.add('on')}
 function hide(){$('m').classList.remove('on')}
 $('m').addEventListener('click',e=>{if(e.target===$('m'))hide()});
 function catSel(){$('f2n').style.display=$('f2').value==='__new'?'':'none'}
 function openItem(id){
- const i=S.items.find(x=>x.id===id)||{name:'',cat:'',qty:0,min:5,price:0};
+ const i=S.items.find(x=>x.id===id)||{name:'',cat:'',brand:'',code:'',qty:0,min:0,cost:0,price:0};
  const cs=cats(),cur=lc(id?i.cat:cat);
  show(`<div class="nm" style="font-size:17px">${id?'Edit item':'New item'}</div>
  <label>Item name</label><input id="f1" value="${esc(i.name)}">
  <label>Category</label><select id="f2" onchange="catSel()">${cs.map(c=>`<option value="${esc(c)}" ${lc(c)===cur?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new">+ New category…</option></select><input id="f2n" placeholder="New category name" style="display:none;margin-top:6px">
+ <label>Brand (optional)</label><input id="f6" value="${esc(i.brand||'')}">
+ <label>Code (optional)</label><input id="f7" value="${esc(i.code||'')}">
  ${id?'':`<label>Opening quantity</label><input id="f3" type="number" inputmode="decimal" value="0">`}
- <label>Low-stock level (alert at or below)</label><input id="f4" type="number" inputmode="decimal" value="${i.min}">
- <label>Unit price</label><input id="f5" type="number" inputmode="decimal" value="${i.price}">
+ <label>Low-stock alert at or below (0 = no alert)</label><input id="f4" type="number" inputmode="decimal" value="${i.min}">
+ <label>Cost price (what you pay)</label><input id="f8" type="number" inputmode="decimal" value="${i.cost}">
+ <label>Sale price</label><input id="f5" type="number" inputmode="decimal" value="${i.price}">
  <div class="acts" style="margin-top:16px">${id?`<button class="btn d" onclick="del('${id}')">Delete</button>`:''}<button class="btn" onclick="hide()">Cancel</button><button class="btn p" onclick="saveItem('${id||''}')">Save</button></div>`);
 }
 function saveItem(id){
  const name=$('f1').value.trim();if(!name){$('f1').focus();return}
  let c=$('f2').value;if(c==='__new')c=$('f2n').value.trim();if(!c){$('f2n').style.display='';$('f2n').focus();return}
- const d={name,cat:c,min:n($('f4').value),price:n($('f5').value)};
- if(id){const it=S.items.find(x=>x.id===id);Object.assign(it,d);put(it)}
+ const d={name,cat:c,brand:$('f6').value.trim(),code:$('f7').value.trim(),min:n($('f4').value),cost:n($('f8').value),price:n($('f5').value)};
+ if(id){const it=S.items.find(x=>x.id===id);Object.assign(it,d);tc.delete(it);put(it)}
  else{const qty=n($('f3').value),it={id:uid(),qty,...d};S.items.push(it);put(it);if(qty)addLog({t:Date.now(),name,d:qty,note:'Opening stock'})}
  hide();render();
 }
@@ -172,7 +239,7 @@ async function move(id,s){
  let cur=i.qty;
  if(DB){const r=await DB.from('items').select('qty').eq('id',id).single();if(r.data)cur=+r.data.qty}
  if(s<0&&v>cur){$('err').textContent='Only '+cur+' in stock.';return}
- i.qty=cur+s*v;put(i);addLog({t:Date.now(),name:i.name,d:s*v,note:$('g2').value.trim()||null});hide();render();
+ i.qty=cur+s*v;i.upd=Date.now();DB.from('items').update({qty:i.qty,upd:i.upd}).eq('id',id).then(ok);addLog({t:Date.now(),name:i.name,d:s*v,note:$('g2').value.trim()||null});hide();render();
 }
 render();init();
 </script></body></html>
