@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Stock Manager</title>
+<title>RAASITH MOBILE</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--tx:#14181f;--mut:#6b7280;--bd:#e3e6ea;--ac:#0f766e;--acx:#fff;--red:#b91c1c;--redbg:#fee2e2;--grn:#166534;--grnbg:#dcfce7;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1116;--card:#171b22;--tx:#eceff4;--mut:#9aa3b2;--bd:#2a303a;--ac:#2dd4bf;--acx:#06201c;--red:#fca5a5;--redbg:#451a1a;--grn:#86efac;--grnbg:#14301e;color-scheme:dark}}
@@ -36,7 +36,7 @@ label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
 .gh{font-weight:700;margin:16px 2px 0;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
 .in{color:var(--grn)}.out{color:var(--red)}.empty{text-align:center;color:var(--mut);padding:30px 10px}
 </style></head><body><div class="w">
-<h1 class="hd"><span>📦 Stock Manager</span><span class="hb"><button id="ib" onclick="openImport()" style="display:none">⬆ Import</button><button id="lb" onclick="lock()" style="display:none">🔒</button></span></h1>
+<h1 class="hd"><span>📦 RAASITH MOBILE</span><span class="hb"><button id="ib" onclick="openImport()" style="display:none">⬆ Import</button><button id="lb" onclick="lock()" style="display:none">🔒</button></span></h1>
 <div id="st" class="mut" style="margin:-6px 0 10px"></div>
 <div id="sum"></div>
 <div class="tabs"><button id="t1" onclick="tab='stock';render()">Stock</button><button id="t2" onclick="tab='log';render()">History</button></div>
@@ -112,7 +112,7 @@ async function gate(){
  if(!PINH){lk('<div style="font-size:40px">🔒</div><div class="nm" style="font-size:18px">Set a PIN</div><p class="mut">Choose 4 to 8 digits. Keep it secret.</p><input id="p1" type="password" inputmode="numeric" maxlength="8" placeholder="PIN"><input id="p2" type="password" inputmode="numeric" maxlength="8" placeholder="Confirm PIN"><div id="pe" class="out mut"></div><button class="btn p" style="width:100%;margin-top:8px" onclick="setPin()">Save PIN</button>');return}
  let saved=null;try{saved=localStorage.getItem('rm_pin')}catch(e){}
  if(saved===PINH){unlock();return}
- lk('<div style="font-size:40px">🔒</div><div class="nm" style="font-size:18px">RM Stock</div><p class="mut">Enter PIN</p><input id="p1" type="password" inputmode="numeric" maxlength="8" placeholder="PIN"><div id="pe" class="out mut"></div><button class="btn p" id="pb" style="width:100%;margin-top:8px" onclick="chk()">Unlock</button>');
+ lk('<div style="font-size:40px">🔒</div><div class="nm" style="font-size:18px">RAASITH MOBILE</div><p class="mut">Enter PIN</p><input id="p1" type="password" inputmode="numeric" maxlength="8" placeholder="PIN"><div id="pe" class="out mut"></div><button class="btn p" id="pb" style="width:100%;margin-top:8px" onclick="chk()">Unlock</button>');
  $('p1').addEventListener('keydown',e=>{if(e.key==='Enter')chk()});
 }
 async function setPin(){
