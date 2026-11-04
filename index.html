@@ -56,7 +56,7 @@ a.btn{text-align:center;text-decoration:none;display:block;color:var(--tx)}a.btn
 @media print{body *{visibility:hidden}#inv,#inv *{visibility:visible}#inv{position:absolute;left:0;top:0;width:100%}}
 .in{color:var(--grn)}.out{color:var(--red)}.empty{text-align:center;color:var(--mut);padding:30px 10px}
 </style></head><body><div class="w">
-<h1 class="hd"><span class="bn"><span id="lg"></span><span class="tt" style="font-size:17px;white-space:nowrap"><b class="r">RAASITH</b> <b class="b">MOBILE</b></span></span><span class="hb"><button id="ib" onclick="openImport()" style="display:none" title="Import Excel">⬆</button><button id="lb" onclick="lock()" style="display:none">🔒</button></span></h1>
+<h1 class="hd"><span class="bn"><span id="lg"></span><span class="tt" style="font-size:17px;white-space:nowrap"><b class="r">RAASITH</b> <b class="b">MOBILE</b></span></span><span class="hb"><button id="ib" onclick="openTools()" style="display:none" title="Tools">⚙</button><button id="lb" onclick="lock()" style="display:none">🔒</button></span></h1>
 <div class="strip"></div>
 <div id="st" class="mut" style="margin:-6px 0 10px"></div>
 <div id="sum"></div>
@@ -162,6 +162,34 @@ async function chk(){
 const n=v=>Math.max(0,parseFloat(v)||0);
 function loadXlsx(){return new Promise((res,rej)=>{if(window.XLSX)return res();const t=document.createElement('script');t.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';t.onload=res;t.onerror=()=>rej(new Error('Could not load Excel reader. Check internet.'));document.head.appendChild(t)})}
 const canon=a=>{const c={};a.forEach(v=>{if(!v)return;const k=v.toLowerCase();c[k]=c[k]||{};c[k][v]=(c[k][v]||0)+1});const o={};for(const k in c)o[k]=Object.entries(c[k]).sort((x,y)=>y[1]-x[1])[0][0];return o};
+function openTools(){
+ show(`<div class="nm" style="font-size:17px">Tools</div>
+ <div class="acts" style="flex-direction:column;margin-top:12px"><button class="btn" onclick="openImport()">⬆ Import item list (Excel)</button><button class="btn p" id="bkb" onclick="doBackup()">⬇ Download backup (Excel)</button></div>
+ <div id="bks" class="mut" style="margin-top:10px">Backup has all items, bills, customers, payments and stock history.</div>
+ <div class="acts" style="margin-top:12px"><button class="btn" onclick="hide()">Close</button></div>`);
+}
+async function fetchAll(t,ord){
+ let out=[],from=0;
+ for(;;){const r=await DB.from(t).select('*').order(ord).range(from,from+999);if(r.error)return[];out=out.concat(r.data);if(r.data.length<1000)break;from+=1000}
+ return out;
+}
+async function doBackup(){
+ $('bkb').disabled=true;$('bks').textContent='Preparing backup…';
+ try{
+  await loadXlsx();
+  const [it,sa,pa,cu,lg]=await Promise.all([fetchAll('items','id'),fetchAll('sales','t'),fetchAll('payments','t'),fetchAll('customers','id'),fetchAll('log','t')]);
+  const d=t=>new Date(+t).toLocaleString('sv-SE');
+  const wb=XLSX.utils.book_new(),add=(rows,name)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows.length?rows:[{}]),name);
+  add(it.map(i=>({ID:i.id,Name:i.name,Category:i.cat,Brand:i.brand||'',Code:i.code||'',Qty:+i.qty||0,'Alert at':+i.min||0,'Cost price':+i.cost||0,'Sale price':+i.price||0})),'Items');
+  add(sa.map(s=>({Invoice:s.inv,Date:d(s.t),Customer:s.cust_name||'',Phone:s.cust_phone||'',Items:(s.items||[]).map(l=>l.name+' x'+l.qty+' @'+l.price).join('; '),Subtotal:+s.subtotal||0,Discount:+s.discount||0,Total:+s.total||0,Paid:+s.paid||0,Due:+s.due||0,Cost:+s.cost||0,Method:s.method||'',Status:s.status||''})),'Sales');
+  add(pa.map(p=>({Date:d(p.t),Customer:p.cust_name||'',Amount:+p.amount||0,Method:p.method||''})),'Payments');
+  add(cu.map(c=>({Name:c.name,Phone:c.phone||''})),'Customers');
+  add(lg.map(l=>({Date:d(l.t),Item:l.name,Change:+l.d||0,Note:l.note||''})),'Stock history');
+  XLSX.writeFile(wb,'RaasithMobile-backup-'+new Date().toLocaleDateString('sv-SE')+'.xlsx');
+  $('bks').textContent='✅ Backup downloaded ('+it.length+' items, '+sa.length+' bills). Check your Downloads folder.';
+ }catch(e){$('bks').textContent='⚠ '+(e.message||e)}
+ $('bkb').disabled=false;
+}
 function openImport(){
  const old=S.items.filter(i=>!String(i.id).startsWith('im')&&!i.qty&&!i.cost&&!i.price).length;
  show(`<div class="nm" style="font-size:17px">Import Excel</div><p class="mut">Choose your item list (.xlsx). Columns needed: Alias, Name, Brand, Group Name, Purc. Price, Sale Price. Quantity starts at 0. Importing again is safe: quantities are kept.</p><input id="xf" type="file" accept=".xlsx,.xls,.csv"><label style="display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--tx);font-size:14px"><input id="xc" type="checkbox" checked style="width:auto;padding:0"> Remove ${old} old items with qty 0 and no price</label><div id="xs" class="mut" style="margin-top:8px"></div><div class="acts" style="margin-top:12px"><button class="btn" onclick="hide()">Close</button><button class="btn p" id="xb" onclick="doImport()">Import</button></div>`);
