@@ -165,7 +165,7 @@ const canon=a=>{const c={};a.forEach(v=>{if(!v)return;const k=v.toLowerCase();c[
 function openTools(){
  show(`<div class="nm" style="font-size:17px">Tools</div>
  <div class="acts" style="flex-direction:column;margin-top:12px"><button class="btn" onclick="openImport()">⬆ Import item list (Excel)</button><button class="btn p" id="bkb" onclick="doBackup()">⬇ Download backup (Excel)</button></div>
- <div id="bks" class="mut" style="margin-top:10px">Backup has all items, bills, customers, payments and stock history.</div>
+ <div id="bks" class="mut" style="margin-top:10px">Backup has all items, bills, returns, customers, payments and stock history.</div>
  <div class="acts" style="margin-top:12px"><button class="btn" onclick="hide()">Close</button></div>`);
 }
 async function fetchAll(t,ord){
@@ -177,12 +177,13 @@ async function doBackup(){
  $('bkb').disabled=true;$('bks').textContent='Preparing backup…';
  try{
   await loadXlsx();
-  const [it,sa,pa,cu,lg]=await Promise.all([fetchAll('items','id'),fetchAll('sales','t'),fetchAll('payments','t'),fetchAll('customers','id'),fetchAll('log','t')]);
+  const [it,sa,pa,cu,lg,rt]=await Promise.all([fetchAll('items','id'),fetchAll('sales','t'),fetchAll('payments','t'),fetchAll('customers','id'),fetchAll('log','t'),fetchAll('returns','t')]);
   const d=t=>new Date(+t).toLocaleString('sv-SE');
   const wb=XLSX.utils.book_new(),add=(rows,name)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows.length?rows:[{}]),name);
   add(it.map(i=>({ID:i.id,Name:i.name,Category:i.cat,Brand:i.brand||'',Code:i.code||'',Qty:+i.qty||0,'Alert at':+i.min||0,'Cost price':+i.cost||0,'Sale price':+i.price||0})),'Items');
   add(sa.map(s=>({Invoice:s.inv,Date:d(s.t),Customer:s.cust_name||'',Phone:s.cust_phone||'',Items:(s.items||[]).map(l=>l.name+' x'+l.qty+' @'+l.price).join('; '),Subtotal:+s.subtotal||0,Discount:+s.discount||0,Total:+s.total||0,Paid:+s.paid||0,Due:+s.due||0,Cost:+s.cost||0,Method:s.method||'',Status:s.status||''})),'Sales');
   add(pa.map(p=>({Date:d(p.t),Customer:p.cust_name||'',Amount:+p.amount||0,Method:p.method||''})),'Payments');
+  add(rt.map(r=>({Return:r.inv,Date:d(r.t),Customer:r.cust_name||'',Phone:r.cust_phone||'',Items:(r.items||[]).map(l=>l.name+' x'+l.qty+' @'+l.price).join('; '),Total:+r.total||0,'Adjusted vs credit':+r.adj||0,'Cash refund':+r.refund||0})),'Returns');
   add(cu.map(c=>({Name:c.name,Phone:c.phone||''})),'Customers');
   add(lg.map(l=>({Date:d(l.t),Item:l.name,Change:+l.d||0,Note:l.note||''})),'Stock history');
   XLSX.writeFile(wb,'RaasithMobile-backup-'+new Date().toLocaleDateString('sv-SE')+'.xlsx');
@@ -277,37 +278,47 @@ function list(){
 }
 
 /* ===== Billing ===== */
-const B={cart:[],cn:'',cp:'',disc:0,method:'Cash',pa:false,paid:0};
-let SA={recent:[],month:[],dues:[],cust:[],err:'',loaded:false},CG=[];
+const B={cart:[],cn:'',cp:'',disc:0,method:'Cash',pa:false,paid:0,mode:'sale',aa:false,adj:0};
+let SA={recent:[],month:[],dues:[],cust:[],rets:[],rmonth:[],err:'',loaded:false},CG=[],SL=[];
 const money=v=>Math.round((+v||0)*100)/100;
 const fm=v=>money(v).toLocaleString();
 const waLink=(ph,txt)=>{let p=(ph||'').replace(/\D/g,'');if(p.startsWith('0'))p='94'+p.slice(1);return 'https://wa.me/'+p+'?text='+encodeURIComponent(txt)};
+const smsLink=(ph,txt)=>'sms:'+(ph||'').replace(/[^\d+]/g,'')+'?body='+encodeURIComponent(txt);
+const shareRow=(ph,txt)=>`<a class="btn" href="${smsLink(ph,txt)}">✉ SMS</a><a class="btn p" target="_blank" rel="noopener" href="${waLink(ph,txt)}">WhatsApp</a>`;
+const duesOf=(name,phone)=>{const nm=lc(name),ph=(phone||'').replace(/\D/g,'');return SA.dues.filter(s=>{const sp=(s.cust_phone||'').replace(/\D/g,'');return (ph&&sp===ph)||(nm&&lc(s.cust_name)===nm)})};
+const dueFor=(name,phone)=>money(duesOf(name,phone).reduce((a,s)=>a+(+s.due||0),0));
 async function loadSales(){
  if(!DB)return;
  const m0=new Date();m0.setDate(1);m0.setHours(0,0,0,0);
- const [a,b,c,d]=await Promise.all([
+ const [a,b,c,d,r1,r2]=await Promise.all([
   DB.from('sales').select('*').order('t',{ascending:false}).limit(100),
   DB.from('sales').select('id,t,total,cost,status').gte('t',m0.getTime()).limit(1000),
   DB.from('sales').select('*').gt('due',0).order('t',{ascending:true}).limit(1000),
-  DB.from('customers').select('id,name,phone').limit(1000)]);
+  DB.from('customers').select('id,name,phone').limit(1000),
+  DB.from('returns').select('*').order('t',{ascending:false}).limit(50),
+  DB.from('returns').select('id,t,total,cost').gte('t',m0.getTime()).limit(1000)]);
  const e=a.error||b.error||c.error||d.error;
- if(e){SA.err=e.message||'Error'}else{SA.err='';SA.recent=a.data;SA.month=b.data;SA.dues=c.data.filter(x=>x.status!=='void');SA.cust=d.data}
- SA.loaded=true;fillCust();
+ if(e){SA.err=e.message||'Error'}else{SA.err='';SA.recent=a.data;SA.month=b.data;SA.dues=c.data.filter(x=>x.status!=='void');SA.cust=d.data;SA.rets=r1.error?[]:r1.data;SA.rmonth=r2.error?[]:r2.data}
+ SA.loaded=true;fillCust();updPrev();
  if(tab==='sales'||tab==='credit')render();
 }
 function fillCust(){const d=$('cl');if(d)d.innerHTML=SA.cust.map(c=>`<option value="${esc(c.name)}">`).join('')}
+function setMode(m){B.mode=m;B.aa=false;$('c').innerHTML='';render()}
+function updPrev(){const e=$('bpv');if(!e)return;const d=(B.cn.trim()||B.cp.trim())?dueFor(B.cn,B.cp):0;e.innerHTML=d>0?'<b class="out">Previous credit balance: '+fm(d)+'</b>':''}
 function buildBill(){
- $('c').innerHTML=`<div id="bill">
- <div class="card"><label style="margin-top:0">Customer name (needed for credit)</label><input id="bcn" list="cl" autocomplete="off" value="${esc(B.cn)}" oninput="B.cn=this.value;pickCust()"><datalist id="cl"></datalist>
- <label>Phone</label><input id="bcp" inputmode="tel" value="${esc(B.cp)}" oninput="B.cp=this.value"></div>
- <div class="card"><label style="margin-top:0">Add item</label><input id="bs" autocomplete="off" placeholder="Type model, e.g. A6X" oninput="bsl()"><div id="br"></div><div id="bl"></div></div>
- <div class="card"><div class="row"><label style="margin:0">Discount</label><input id="bd" type="number" inputmode="decimal" style="width:130px;text-align:right" value="${B.disc||''}" placeholder="0" oninput="B.disc=n(this.value);bt()"></div>
+ const R=B.mode==='return';
+ $('c').innerHTML=`<div id="bill"><div class="seg"><button class="${R?'':'on'}" onclick="setMode('sale')">Sale</button><button class="${R?'on':''}" onclick="setMode('return')">↩ Return</button></div>
+ <div class="card"><label style="margin-top:0">Customer name ${R?'(needed to adjust credit)':'(needed for credit)'}</label><input id="bcn" list="cl" autocomplete="off" value="${esc(B.cn)}" oninput="B.cn=this.value;pickCust();updPrev();bt()"><datalist id="cl"></datalist>
+ <label>Phone</label><input id="bcp" inputmode="tel" value="${esc(B.cp)}" oninput="B.cp=this.value;updPrev();bt()"><div id="bpv" style="margin-top:6px"></div></div>
+ <div class="card"><label style="margin-top:0">${R?'Returned item':'Add item'}</label><input id="bs" autocomplete="off" placeholder="Type model, e.g. A6X" oninput="bsl()"><div id="br"></div><div id="bl"></div></div>
+ ${R?`<div class="card"><div id="bsum"></div><div id="bdue" style="margin-top:6px"></div><label>Adjust against customer credit</label><input id="ba" type="number" inputmode="decimal" oninput="B.aa=true;B.adj=n(this.value);bt(true)"></div>`:
+ `<div class="card"><div class="row"><label style="margin:0">Discount</label><input id="bd" type="number" inputmode="decimal" style="width:130px;text-align:right" value="${B.disc||''}" placeholder="0" oninput="B.disc=n(this.value);bt()"></div>
  <div id="bsum" style="margin-top:8px"></div>
  <label>Payment</label><select id="bm" onchange="B.method=this.value;B.pa=false;bt()">${['Cash','Card','Bank','Credit'].map(m=>`<option ${B.method===m?'selected':''}>${m}</option>`).join('')}</select>
  <label>Paid now</label><input id="bp" type="number" inputmode="decimal" oninput="B.pa=true;B.paid=n(this.value);bt(true)">
- <div id="bdue" style="margin-top:6px"></div></div>
- <div class="acts"><button class="btn" onclick="billReset()">Clear</button><button class="btn p" id="bsv" onclick="billSave()">Save &amp; Invoice</button></div></div>`;
- fillCust();rcart();bt();
+ <div id="bdue" style="margin-top:6px"></div></div>`}
+ <div class="acts"><button class="btn" onclick="billReset(true)">Clear</button><button class="btn p" id="bsv" onclick="${R?'retSave()':'billSave()'}">${R?'Save return':'Save &amp; Invoice'}</button></div></div>`;
+ fillCust();rcart();bt();updPrev();
 }
 function pickCust(){const c=SA.cust.find(x=>lc(x.name)===lc(B.cn));if(c&&!B.cp&&c.phone){B.cp=c.phone;$('bcp').value=c.phone}}
 let bt0;function bsl(){clearTimeout(bt0);bt0=setTimeout(bsearch,120)}
@@ -334,7 +345,17 @@ function setQ(k,v){B.cart[k].qty=n(v);bt()}
 function setPr(k,v){B.cart[k].price=n(v);bt()}
 function stepQ(k,d){const l=B.cart[k];l.qty=Math.max(0,money(l.qty+d));$('q'+k).value=l.qty;bt()}
 function bsum(){const sub=B.cart.reduce((a,l)=>a+l.qty*l.price,0),cost=B.cart.reduce((a,l)=>a+l.qty*l.cost,0),disc=Math.min(B.disc,sub);return{sub:money(sub),cost:money(cost),disc:money(disc),total:money(sub-disc)}}
+function btReturn(fromAdj){
+ const total=money(B.cart.reduce((a,l)=>a+l.qty*l.price,0)),due=B.cn.trim()||B.cp.trim()?dueFor(B.cn,B.cp):0,max=Math.min(total,due);
+ if(!B.aa)B.adj=max;
+ if(B.adj>max)B.adj=max;
+ if(!fromAdj&&$('ba'))$('ba').value=B.adj;
+ if($('bsum'))$('bsum').innerHTML=`<div class="tot big"><span>Return value</span><span>${fm(total)}</span></div><div class="tot"><span>Adjust against credit</span><span>− ${fm(B.adj)}</span></div><div class="tot big"><span>Cash refund</span><span>${fm(total-B.adj)}</span></div>`;
+ if($('bdue'))$('bdue').innerHTML=due>0?`<span>Customer owes <b class="out">${fm(due)}</b></span>`:'<span class="mut">No credit due. Full cash refund.</span>';
+ B.cart.forEach((l,k)=>{const e=$('lt'+k);if(e)e.textContent=fm(l.qty*l.price)});
+}
 function bt(fromPaid){
+ if(B.mode==='return')return btReturn(fromPaid);
  const t=bsum();
  if(!B.pa)B.paid=B.method==='Credit'?0:t.total;
  if(B.paid>t.total)B.paid=t.total;
@@ -344,17 +365,20 @@ function bt(fromPaid){
  if($('bdue'))$('bdue').innerHTML=due>0?`<b class="out">Balance due: ${fm(due)} (credit)</b>`:'<span class="mut">Fully paid</span>';
  B.cart.forEach((l,k)=>{const e=$('lt'+k);if(e)e.textContent=fm(l.qty*l.price)});
 }
-function billReset(){B.cart=[];B.cn='';B.cp='';B.disc=0;B.method='Cash';B.pa=false;B.paid=0;$('c').innerHTML='';render()}
+function billReset(keep){B.cart=[];B.cn='';B.cp='';B.disc=0;B.method='Cash';B.pa=false;B.paid=0;B.aa=false;B.adj=0;if(!keep)B.mode='sale';$('c').innerHTML='';render()}
 async function billSave(){
- const t=bsum(),due=money(t.total-B.paid),lines=B.cart.filter(l=>l.qty>0);
+ const t=bsum(),due=money(t.total-B.paid),lines=B.cart.filter(l=>l.qty>0),name0=B.cn.trim()||B.cp.trim();
  if(!lines.length){alert('Add at least one item.');return}
  if(due>0&&!B.cn.trim()){alert('Enter the customer name for credit or balance.');$('bcn').focus();return}
  $('bsv').disabled=true;
  try{
+  await loadSales();const prev=name0?dueFor(B.cn,B.cp):0;
   const sq=await DB.rpc('next_inv');if(sq.error)throw sq.error;
   const inv='RM-'+String(sq.data).padStart(5,'0'),now=Date.now(),name=B.cn.trim(),phone=B.cp.trim(),cid=name?(phone||lc(name)):'';
-  const sale={id:uid(),inv,t:now,cust_id:cid,cust_name:name,cust_phone:phone,items:lines.map(l=>({id:l.id,name:l.name,qty:l.qty,price:l.price,cost:l.cost})),subtotal:t.sub,discount:t.disc,total:t.total,paid:B.paid,due,cost:t.cost,method:B.method,status:'ok',note:''};
-  const r=await DB.from('sales').insert(sale);if(r.error)throw r.error;
+  const sale={id:uid(),inv,t:now,cust_id:cid,cust_name:name,cust_phone:phone,items:lines.map(l=>({id:l.id,name:l.name,qty:l.qty,price:l.price,cost:l.cost})),subtotal:t.sub,discount:t.disc,total:t.total,paid:B.paid,due,prev,cost:t.cost,method:B.method,status:'ok',note:''};
+  let r=await DB.from('sales').insert(sale);
+  if(r.error&&/prev/.test(r.error.message||'')){const s2={...sale};delete s2.prev;r=await DB.from('sales').insert(s2)}
+  if(r.error)throw r.error;
   if(name)await DB.from('customers').upsert({id:cid,name,phone,upd:now});
   for(const l of lines){await DB.rpc('change_qty',{p_id:l.id,p_delta:-l.qty});const it=S.items.find(x=>x.id===l.id);if(it){it.qty=money(it.qty-l.qty);it.upd=now}}
   await DB.from('log').insert(lines.map(l=>({t:now,name:l.name,d:-l.qty,note:'Sale '+inv})));
@@ -362,9 +386,11 @@ async function billSave(){
  }catch(e){alert('Could not save: '+(e.message||e));const b=$('bsv');if(b)b.disabled=false}
 }
 function invText(s){
- return 'RAASITH MOBILE - Akkaraipattu\nInvoice: '+s.inv+'\nDate: '+new Date(s.t).toLocaleString()+(s.cust_name?'\nCustomer: '+s.cust_name:'')+'\n\n'+s.items.map((l,k)=>(k+1)+') '+l.name+' x'+l.qty+' @'+fm(l.price)+' = '+fm(l.qty*l.price)).join('\n')+'\n\n'+(s.discount>0?'Discount: '+fm(s.discount)+'\n':'')+'Total: '+fm(s.total)+'\nPaid: '+fm(s.paid)+(s.due>0?'\nBalance due: '+fm(s.due):'')+'\n\nThank you!';
+ const prev=+s.prev||0,due=+s.due||0;
+ return 'RAASITH MOBILE - Akkaraipattu\nInvoice: '+s.inv+'\nDate: '+new Date(s.t).toLocaleString()+(s.cust_name?'\nCustomer: '+s.cust_name:'')+'\n\n'+s.items.map((l,k)=>(k+1)+') '+l.name+' x'+l.qty+' @'+fm(l.price)+' = '+fm(l.qty*l.price)).join('\n')+'\n\n'+(s.discount>0?'Discount: '+fm(s.discount)+'\n':'')+'Total: '+fm(s.total)+'\nPaid: '+fm(s.paid)+(due>0?'\nBalance (this bill): '+fm(due):'')+(prev>0?'\nPrevious balance: '+fm(prev):'')+(prev+due>0?'\nTOTAL BALANCE TO PAY: '+fm(prev+due):'')+'\n\nThank you!';
 }
 function showInvoice(s,canVoid){
+ const prev=+s.prev||0,due=+s.due||0;
  const rows=s.items.map(l=>`<tr><td>${esc(l.name)}</td><td style="text-align:right">${l.qty}</td><td style="text-align:right">${fm(l.price)}</td><td style="text-align:right">${fm(l.qty*l.price)}</td></tr>`).join('');
  show(`<div id="inv"><div style="text-align:center"><div style="font-weight:800;font-size:18px;color:#053299">RAASITH MOBILE</div><div style="font-size:12px;color:#555">Akkaraipattu</div></div>
  <div style="display:flex;justify-content:space-between;font-size:13px;margin-top:10px"><b>${esc(s.inv)}</b><span>${new Date(s.t).toLocaleString()}</span></div>
@@ -375,22 +401,80 @@ function showInvoice(s,canVoid){
  ${s.discount>0?`<div class="tot"><span>Discount</span><span>− ${fm(s.discount)}</span></div>`:''}
  <div class="tot big"><span>Total</span><span>${fm(s.total)}</span></div>
  <div class="tot"><span>Paid (${esc(s.method||'')})</span><span>${fm(s.paid)}</span></div>
- ${s.due>0?`<div class="tot" style="color:#b91c1c"><b>Balance due</b><b>${fm(s.due)}</b></div>`:''}
+ ${due>0?`<div class="tot" style="color:#b91c1c"><span>Balance (this bill)</span><b>${fm(due)}</b></div>`:''}
+ ${prev>0?`<div class="tot"><span>Previous balance</span><span>${fm(prev)}</span></div>`:''}
+ ${prev+due>0?`<div class="tot big" style="color:#b91c1c"><span>Total balance</span><span>${fm(prev+due)}</span></div>`:''}
  <div style="text-align:center;font-size:12px;color:#555;margin-top:8px">Thank you!</div></div>
- <div class="acts" style="margin-top:12px"><button class="btn" onclick="hide()">Close</button><button class="btn" onclick="window.print()">Print</button><a class="btn p" target="_blank" rel="noopener" href="${waLink(s.cust_phone,invText(s))}">WhatsApp</a></div>
- ${canVoid&&s.status!=='void'?`<div class="acts"><button class="btn d" onclick="voidSale('${s.id}')">Cancel this bill</button></div>`:''}`);
+ <div class="acts" style="margin-top:12px"><button class="btn" onclick="hide()">Close</button><button class="btn" onclick="window.print()">Print</button></div>
+ <div class="acts">${shareRow(s.cust_phone,invText(s))}</div>
+ ${canVoid&&s.status!=='void'?`<div class="acts"><button class="btn" onclick="startReturn('${s.id}')">↩ Return items</button><button class="btn d" onclick="voidSale('${s.id}')">Cancel bill</button></div>`:''}`);
+}
+function startReturn(id){
+ const s=SA.recent.find(x=>x.id===id);if(!s)return;
+ B.mode='return';B.aa=false;B.adj=0;B.cn=s.cust_name||'';B.cp=s.cust_phone||'';
+ B.cart=s.items.map(l=>({id:l.id,name:l.name,qty:l.qty,price:l.price,cost:l.cost||0}));
+ tab='bill';hide();$('c').innerHTML='';render();
+}
+async function applyPay(bills,amt){
+ let rem=amt;
+ for(const s of bills.slice().sort((a,b)=>a.t-b.t)){
+  if(rem<=0)break;const p=Math.min(rem,+s.due);
+  const r=await DB.from('sales').update({paid:money((+s.paid||0)+p),due:money(s.due-p)}).eq('id',s.id);
+  if(r.error)throw r.error;rem=money(rem-p);
+ }
+}
+function retText(r){
+ return 'RAASITH MOBILE - Akkaraipattu\nReturn: '+r.inv+'\nDate: '+new Date(r.t).toLocaleString()+(r.cust_name?'\nCustomer: '+r.cust_name:'')+'\n\n'+r.items.map((l,k)=>(k+1)+') '+l.name+' x'+l.qty+' @'+fm(l.price)+' = '+fm(l.qty*l.price)).join('\n')+'\n\nReturn value: '+fm(r.total)+(r.adj>0?'\nAdjusted against your credit: '+fm(r.adj):'')+(r.refund>0?'\nCash refund: '+fm(r.refund):'')+(r.dueAfter!=null&&r.dueAfter>0?'\nRemaining balance: '+fm(r.dueAfter):'')+'\n\nThank you!';
+}
+function showReturn(r){
+ const rows=r.items.map(l=>`<tr><td>${esc(l.name)}</td><td style="text-align:right">${l.qty}</td><td style="text-align:right">${fm(l.price)}</td><td style="text-align:right">${fm(l.qty*l.price)}</td></tr>`).join('');
+ show(`<div id="inv"><div style="text-align:center"><div style="font-weight:800;font-size:18px;color:#053299">RAASITH MOBILE</div><div style="font-size:12px;color:#555">Akkaraipattu · RETURN</div></div>
+ <div style="display:flex;justify-content:space-between;font-size:13px;margin-top:10px"><b>${esc(r.inv)}</b><span>${new Date(r.t).toLocaleString()}</span></div>
+ ${r.cust_name?`<div style="font-size:13px">Customer: <b>${esc(r.cust_name)}</b>${r.cust_phone?' · '+esc(r.cust_phone):''}</div>`:''}
+ <table style="width:100%;font-size:13px;border-collapse:collapse;margin-top:8px"><tr style="border-bottom:1px solid #ccc;text-align:left"><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Total</th></tr>${rows}</table>
+ <hr style="border:0;border-top:1px solid #ccc">
+ <div class="tot big"><span>Return value</span><span>${fm(r.total)}</span></div>
+ ${r.adj>0?`<div class="tot"><span>Adjusted against credit</span><span>${fm(r.adj)}</span></div>`:''}
+ ${r.refund>0?`<div class="tot"><span>Cash refund</span><b>${fm(r.refund)}</b></div>`:''}
+ ${r.dueAfter!=null&&r.dueAfter>0?`<div class="tot" style="color:#b91c1c"><span>Remaining balance</span><b>${fm(r.dueAfter)}</b></div>`:''}
+ <div style="text-align:center;font-size:12px;color:#555;margin-top:8px">Thank you!</div></div>
+ <div class="acts" style="margin-top:12px"><button class="btn" onclick="hide()">Close</button><button class="btn" onclick="window.print()">Print</button></div>
+ <div class="acts">${shareRow(r.cust_phone,retText(r))}</div>`);
+}
+async function retSave(){
+ const lines=B.cart.filter(l=>l.qty>0);
+ if(!lines.length){alert('Add at least one returned item.');return}
+ const total=money(lines.reduce((a,l)=>a+l.qty*l.price,0)),cost=money(lines.reduce((a,l)=>a+l.qty*l.cost,0));
+ $('bsv').disabled=true;
+ try{
+  await loadSales();
+  const name=B.cn.trim(),phone=B.cp.trim(),cid=name?(phone||lc(name)):'',dueB=(name||phone)?dueFor(B.cn,B.cp):0;
+  let adj=money(Math.max(0,Math.min(B.aa?B.adj:dueB,total,dueB)));
+  const refund=money(total-adj);
+  const sq=await DB.rpc('next_inv');if(sq.error)throw sq.error;
+  const inv='RT-'+String(sq.data).padStart(5,'0'),now=Date.now();
+  const rt={id:uid(),inv,t:now,cust_id:cid,cust_name:name,cust_phone:phone,items:lines.map(l=>({id:l.id,name:l.name,qty:l.qty,price:l.price,cost:l.cost})),total,cost,adj,refund,note:''};
+  const r=await DB.from('returns').insert(rt);if(r.error)throw r.error;
+  if(name)await DB.from('customers').upsert({id:cid,name,phone,upd:now});
+  for(const l of lines){await DB.rpc('change_qty',{p_id:l.id,p_delta:l.qty});const it=S.items.find(x=>x.id===l.id);if(it){it.qty=money(it.qty+l.qty);it.upd=now}}
+  await DB.from('log').insert(lines.map(l=>({t:now,name:l.name,d:l.qty,note:'Return '+inv})));
+  if(adj>0){await applyPay(duesOf(name,phone),adj);await DB.from('payments').insert({id:uid(),t:now,cust_id:cid,cust_name:name,amount:adj,method:'Return',note:inv})}
+  rt.dueAfter=money(dueB-adj);
+  billReset();showReturn(rt);loadSales();
+ }catch(e){alert('Could not save: '+(e.message||e));const b=$('bsv');if(b)b.disabled=false}
 }
 function salesView(){
  if(!SA.loaded){$('c').innerHTML='<div class="empty">Loading…</div>';loadSales();return}
  if(SA.err){$('c').innerHTML='<div class="empty">'+esc(SA.err)+'<br><br>Run the billing SQL in Supabase first.</div>';return}
  const d0=new Date();d0.setHours(0,0,0,0);const t0=d0.getTime();
- const ok=SA.month.filter(x=>x.status!=='void'),td=ok.filter(x=>x.t>=t0);
+ const ok=SA.month.filter(x=>x.status!=='void'),td=ok.filter(x=>x.t>=t0),rm=SA.rmonth,rtd=rm.filter(x=>x.t>=t0);
  const sum=a=>a.reduce((x,y)=>x+(+y.total||0),0),prof=a=>a.reduce((x,y)=>x+(+y.total||0)-(+y.cost||0),0),due=SA.dues.reduce((x,y)=>x+(+y.due||0),0);
  const badge=x=>x.status==='void'?'<span class="badge b-v">Cancelled</span>':x.due>0?'<span class="badge b-due">Due '+fm(x.due)+'</span>':'<span class="badge b-ok">Paid</span>';
- $('c').innerHTML=`<div class="kp"><div><b>${fm(sum(td))}</b><span>Today sales (${td.length})</span></div><div><b>${fm(prof(td))}</b><span>Today profit</span></div><div><b>${fm(sum(ok))}</b><span>This month (${ok.length})</span></div><div><b class="${due>0?'out':''}">${fm(due)}</b><span>Credit due</span></div></div>`+
- (SA.recent.length?SA.recent.map((x,k)=>`<div class="card" onclick="viewSale(${k})"><div class="row"><div><div class="nm">${esc(x.inv)} · ${esc(x.cust_name||'Walk-in')}</div><div class="mut">${new Date(x.t).toLocaleString()} · ${x.items.length} item(s)</div></div><div style="text-align:right"><b>${fm(x.total)}</b><br>${badge(x)}</div></div></div>`).join(''):'<div class="empty">No bills yet. Go to Bill tab.</div>');
+ SL=[...SA.recent.map(x=>({k:'s',x})),...SA.rets.map(x=>({k:'r',x}))].sort((a,b)=>b.x.t-a.x.t).slice(0,100);
+ $('c').innerHTML=`<div class="kp"><div><b>${fm(sum(td)-sum(rtd))}</b><span>Today sales (${td.length}) net</span></div><div><b>${fm(prof(td)-prof(rtd))}</b><span>Today profit</span></div><div><b>${fm(sum(ok)-sum(rm))}</b><span>This month net (${ok.length})</span></div><div><b class="${due>0?'out':''}">${fm(due)}</b><span>Credit due</span></div></div>`+(rtd.length?`<div class="mut" style="margin:-4px 2px 8px">Returns today: ${fm(sum(rtd))} (${rtd.length})</div>`:'')+
+ (SL.length?SL.map((e,i)=>{const x=e.x;return e.k==='s'?`<div class="card" onclick="viewSale(${i})"><div class="row"><div><div class="nm">${esc(x.inv)} · ${esc(x.cust_name||'Walk-in')}</div><div class="mut">${new Date(x.t).toLocaleString()} · ${x.items.length} item(s)</div></div><div style="text-align:right"><b>${fm(x.total)}</b><br>${badge(x)}</div></div></div>`:`<div class="card" onclick="viewSale(${i})"><div class="row"><div><div class="nm">${esc(x.inv)} · ${esc(x.cust_name||'Walk-in')}</div><div class="mut">${new Date(x.t).toLocaleString()} · ${x.items.length} item(s)</div></div><div style="text-align:right"><b class="out">− ${fm(x.total)}</b><br><span class="badge b-v">Return</span></div></div></div>`}).join(''):'<div class="empty">No bills yet. Go to Bill tab.</div>');
 }
-function viewSale(k){showInvoice(SA.recent[k],true)}
+function viewSale(i){const e=SL[i];if(!e)return;e.k==='s'?showInvoice(e.x,true):showReturn(e.x)}
 async function voidSale(id){
  const s=SA.recent.find(x=>x.id===id);if(!s||s.status==='void')return;
  if(!confirm('Cancel bill '+s.inv+'? Stock will be returned.'))return;
@@ -421,17 +505,15 @@ function openCust(k){
  <label>Receive payment</label><input id="cpay" type="number" inputmode="decimal" value="${g.due}">
  <label>Method</label><select id="cpm"><option>Cash</option><option>Bank</option><option>Card</option></select>
  <div class="acts" style="margin-top:14px"><button class="btn" onclick="hide()">Close</button><button class="btn p" onclick="recv(${k})">Receive</button></div>
- <div class="acts">${g.phone?`<a class="btn" href="tel:${esc(g.phone)}">Call</a>`:''}<a class="btn" target="_blank" rel="noopener" href="${waLink(g.phone,rem)}">WhatsApp reminder</a></div>`);
+ <div class="acts">${g.phone?`<a class="btn" href="tel:${esc(g.phone)}">Call</a>`:''}</div>
+ <div class="acts">${shareRow(g.phone,rem)}</div>`);
 }
 async function recv(k){
  const g=CG[k];let amt=n($('cpay').value);if(!amt)return;if(amt>g.due)amt=g.due;
- let rem=amt;
- for(const s of g.bills.slice().sort((a,b)=>a.t-b.t)){
-  if(rem<=0)break;const p=Math.min(rem,+s.due);
-  const r=await DB.from('sales').update({paid:money((+s.paid||0)+p),due:money(s.due-p)}).eq('id',s.id);
-  if(r.error){alert(r.error.message);return}rem=money(rem-p);
- }
- await DB.from('payments').insert({id:uid(),t:Date.now(),cust_id:g.id,cust_name:g.name,amount:amt,method:$('cpm').value,note:''});
+ try{
+  await applyPay(g.bills,amt);
+  await DB.from('payments').insert({id:uid(),t:Date.now(),cust_id:g.id,cust_name:g.name,amount:amt,method:$('cpm').value,note:''});
+ }catch(e){alert(e.message||e);return}
  hide();loadSales();
 }
 function show(h){$('mb').innerHTML=h;$('m').classList.add('on')}
