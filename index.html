@@ -282,10 +282,11 @@ const B={cart:[],cn:'',cp:'',disc:0,method:'Cash',pa:false,paid:0,mode:'sale',aa
 let SA={recent:[],month:[],dues:[],cust:[],rets:[],rmonth:[],err:'',loaded:false},CG=[],SL=[];
 const money=v=>Math.round((+v||0)*100)/100;
 const fm=v=>money(v).toLocaleString();
-const waLink=(ph,txt)=>{let p=(ph||'').replace(/\D/g,'');if(p.startsWith('0'))p='94'+p.slice(1);return 'https://wa.me/'+p+'?text='+encodeURIComponent(txt)};
-const smsLink=(ph,txt)=>'sms:'+(ph||'').replace(/[^\d+]/g,'')+'?body='+encodeURIComponent(txt);
+const np=p=>{let d=(p||'').replace(/\D/g,'');if(d.startsWith('0094'))d='0'+d.slice(4);else if(d.startsWith('94')&&d.length>=11)d='0'+d.slice(2);return d};
+const waLink=(ph,txt)=>{let p=np(ph);if(p.startsWith('0'))p='94'+p.slice(1);return 'https://wa.me/'+p+'?text='+encodeURIComponent(txt)};
+const smsLink=(ph,txt)=>'sms:'+np(ph)+'?body='+encodeURIComponent(txt);
 const shareRow=(ph,txt)=>`<a class="btn" href="${smsLink(ph,txt)}">✉ SMS</a><a class="btn p" target="_blank" rel="noopener" href="${waLink(ph,txt)}">WhatsApp</a>`;
-const duesOf=(name,phone)=>{const nm=lc(name),ph=(phone||'').replace(/\D/g,'');return SA.dues.filter(s=>{const sp=(s.cust_phone||'').replace(/\D/g,'');return (ph&&sp===ph)||(nm&&lc(s.cust_name)===nm)})};
+const duesOf=(name,phone)=>{const nm=lc(name),ph=np(phone);return SA.dues.filter(s=>{const sp=np(s.cust_phone);return (ph&&sp===ph)||(nm&&lc(s.cust_name)===nm)})};
 const dueFor=(name,phone)=>money(duesOf(name,phone).reduce((a,s)=>a+(+s.due||0),0));
 async function loadSales(){
  if(!DB)return;
@@ -309,7 +310,7 @@ function buildBill(){
  const R=B.mode==='return';
  $('c').innerHTML=`<div id="bill"><div class="seg"><button class="${R?'':'on'}" onclick="setMode('sale')">Sale</button><button class="${R?'on':''}" onclick="setMode('return')">↩ Return</button></div>
  <div class="card"><label style="margin-top:0">Customer name ${R?'(needed to adjust credit)':'(needed for credit)'}</label><input id="bcn" list="cl" autocomplete="off" value="${esc(B.cn)}" oninput="B.cn=this.value;pickCust();updPrev();bt()"><datalist id="cl"></datalist>
- <label>Phone</label><input id="bcp" inputmode="tel" value="${esc(B.cp)}" oninput="B.cp=this.value;updPrev();bt()"><div id="bpv" style="margin-top:6px"></div></div>
+ <label>Phone</label><div class="row" style="gap:8px"><input id="bcp" inputmode="tel" value="${esc(B.cp)}" oninput="B.cp=this.value;updPrev();bt()" style="flex:1"><button class="btn" style="flex:none;padding:11px 12px" onclick="pickContact()">📇 Contacts</button></div><div id="bpv" style="margin-top:6px"></div></div>
  <div class="card"><label style="margin-top:0">${R?'Returned item':'Add item'}</label><input id="bs" autocomplete="off" placeholder="Type model, e.g. A6X" oninput="bsl()"><div id="br"></div><div id="bl"></div></div>
  ${R?`<div class="card"><div id="bsum"></div><div id="bdue" style="margin-top:6px"></div><label>Adjust against customer credit</label><input id="ba" type="number" inputmode="decimal" oninput="B.aa=true;B.adj=n(this.value);bt(true)"></div>`:
  `<div class="card"><div class="row"><label style="margin:0">Discount</label><input id="bd" type="number" inputmode="decimal" style="width:130px;text-align:right" value="${B.disc||''}" placeholder="0" oninput="B.disc=n(this.value);bt()"></div>
@@ -320,6 +321,20 @@ function buildBill(){
  <div class="acts"><button class="btn" onclick="billReset(true)">Clear</button><button class="btn p" id="bsv" onclick="${R?'retSave()':'billSave()'}">${R?'Save return':'Save &amp; Invoice'}</button></div></div>`;
  fillCust();rcart();bt();updPrev();
 }
+async function pickContact(){
+ if(!('contacts' in navigator)||!navigator.contacts.select){alert('Contact picker is not available in this browser. Please use Chrome on Android, or type the number.');return}
+ try{
+  const r=await navigator.contacts.select(['name','tel'],{multiple:false});
+  if(!r||!r.length)return;
+  const c=r[0],nm=((c.name||[])[0]||'').trim(),tels=[...new Set((c.tel||[]).map(np).filter(Boolean))];
+  if(nm){B.cn=nm;if($('bcn'))$('bcn').value=nm}
+  if(tels.length>1){
+   show(`<div class="nm" style="font-size:17px">${esc(nm||'Contact')}</div><div class="mut">Choose a number</div><div class="acts" style="flex-direction:column;margin-top:10px">${tels.map(t=>`<button class="btn" onclick="setTel('${t}')">${t}</button>`).join('')}</div>`);
+  }else if(tels.length){setTel(tels[0])}
+  else{updPrev();bt()}
+ }catch(e){}
+}
+function setTel(t){B.cp=t;if($('bcp'))$('bcp').value=t;hide();updPrev();bt()}
 function pickCust(){const c=SA.cust.find(x=>lc(x.name)===lc(B.cn));if(c&&!B.cp&&c.phone){B.cp=c.phone;$('bcp').value=c.phone}}
 let bt0;function bsl(){clearTimeout(bt0);bt0=setTimeout(bsearch,120)}
 function bsearch(){
@@ -374,7 +389,7 @@ async function billSave(){
  try{
   await loadSales();const prev=name0?dueFor(B.cn,B.cp):0;
   const sq=await DB.rpc('next_inv');if(sq.error)throw sq.error;
-  const inv='RM-'+String(sq.data).padStart(5,'0'),now=Date.now(),name=B.cn.trim(),phone=B.cp.trim(),cid=name?(phone||lc(name)):'';
+  const inv='RM-'+String(sq.data).padStart(5,'0'),now=Date.now(),name=B.cn.trim(),phone=np(B.cp),cid=name?(phone||lc(name)):'';
   const sale={id:uid(),inv,t:now,cust_id:cid,cust_name:name,cust_phone:phone,items:lines.map(l=>({id:l.id,name:l.name,qty:l.qty,price:l.price,cost:l.cost})),subtotal:t.sub,discount:t.disc,total:t.total,paid:B.paid,due,prev,cost:t.cost,method:B.method,status:'ok',note:''};
   let r=await DB.from('sales').insert(sale);
   if(r.error&&/prev/.test(r.error.message||'')){const s2={...sale};delete s2.prev;r=await DB.from('sales').insert(s2)}
@@ -406,7 +421,8 @@ function showInvoice(s,canVoid){
  ${prev+due>0?`<div class="tot big" style="color:#b91c1c"><span>Total balance</span><span>${fm(prev+due)}</span></div>`:''}
  <div style="text-align:center;font-size:12px;color:#555;margin-top:8px">Thank you!</div></div>
  <div class="acts" style="margin-top:12px"><button class="btn" onclick="hide()">Close</button><button class="btn" onclick="window.print()">Print</button></div>
- <div class="acts">${shareRow(s.cust_phone,invText(s))}</div>
+ <div class="mut" style="margin-top:10px">Send to: <b>${esc(s.cust_name||'Customer')}</b> ${s.cust_phone?esc(s.cust_phone):'(no phone number, you can choose in the app)'}</div>
+ <div class="acts" style="margin-top:6px">${shareRow(s.cust_phone,invText(s))}</div>
  ${canVoid&&s.status!=='void'?`<div class="acts"><button class="btn" onclick="startReturn('${s.id}')">↩ Return items</button><button class="btn d" onclick="voidSale('${s.id}')">Cancel bill</button></div>`:''}`);
 }
 function startReturn(id){
@@ -439,7 +455,8 @@ function showReturn(r){
  ${r.dueAfter!=null&&r.dueAfter>0?`<div class="tot" style="color:#b91c1c"><span>Remaining balance</span><b>${fm(r.dueAfter)}</b></div>`:''}
  <div style="text-align:center;font-size:12px;color:#555;margin-top:8px">Thank you!</div></div>
  <div class="acts" style="margin-top:12px"><button class="btn" onclick="hide()">Close</button><button class="btn" onclick="window.print()">Print</button></div>
- <div class="acts">${shareRow(r.cust_phone,retText(r))}</div>`);
+ <div class="mut" style="margin-top:10px">Send to: <b>${esc(r.cust_name||'Customer')}</b> ${r.cust_phone?esc(r.cust_phone):'(no phone number)'}</div>
+ <div class="acts" style="margin-top:6px">${shareRow(r.cust_phone,retText(r))}</div>`);
 }
 async function retSave(){
  const lines=B.cart.filter(l=>l.qty>0);
@@ -448,7 +465,7 @@ async function retSave(){
  $('bsv').disabled=true;
  try{
   await loadSales();
-  const name=B.cn.trim(),phone=B.cp.trim(),cid=name?(phone||lc(name)):'',dueB=(name||phone)?dueFor(B.cn,B.cp):0;
+  const name=B.cn.trim(),phone=np(B.cp),cid=name?(phone||lc(name)):'',dueB=(name||phone)?dueFor(B.cn,B.cp):0;
   let adj=money(Math.max(0,Math.min(B.aa?B.adj:dueB,total,dueB)));
   const refund=money(total-adj);
   const sq=await DB.rpc('next_inv');if(sq.error)throw sq.error;
@@ -489,16 +506,17 @@ function creditGroups(){
  SA.dues.forEach(s=>{const k=s.cust_id||s.cust_name||'?';let g=m.get(k);if(!g){g={id:k,name:s.cust_name||'Unknown',phone:'',due:0,bills:[]};m.set(k,g)}g.due=money(g.due+(+s.due||0));g.bills.push(s);if(s.cust_phone)g.phone=s.cust_phone});
  return [...m.values()].sort((a,b)=>b.due-a.due);
 }
+const remText=g=>'Dear '+g.name+', your outstanding balance at RAASITH MOBILE is Rs. '+fm(g.due)+'. Please settle at your earliest convenience. Thank you.';
 function creditView(){
  if(!SA.loaded){$('c').innerHTML='<div class="empty">Loading…</div>';loadSales();return}
  if(SA.err){$('c').innerHTML='<div class="empty">'+esc(SA.err)+'<br><br>Run the billing SQL in Supabase first.</div>';return}
  CG=creditGroups();const tot=CG.reduce((a,x)=>a+x.due,0);
  $('c').innerHTML=`<div class="kp"><div><b class="${tot>0?'out':''}">${fm(tot)}</b><span>Total credit due</span></div><div><b>${CG.length}</b><span>Customers owing</span></div></div>`+
- (CG.length?CG.map((x,k)=>`<div class="card" onclick="openCust(${k})"><div class="row"><div><div class="nm">${esc(x.name)}</div><div class="mut">${esc(x.phone||'No phone')} · ${x.bills.length} bill(s)</div></div><b class="out" style="font-size:18px">${fm(x.due)}</b></div></div>`).join(''):'<div class="empty">No credit due 🎉</div>');
+ (CG.length?CG.map((x,k)=>`<div class="card" onclick="openCust(${k})"><div class="row"><div><div class="nm">${esc(x.name)}</div><div class="mut">${esc(x.phone||'No phone')} · ${x.bills.length} bill(s)</div></div><b class="out" style="font-size:18px">${fm(x.due)}</b></div><div class="acts" onclick="event.stopPropagation()">${shareRow(x.phone,remText(x))}</div></div>`).join(''):'<div class="empty">No credit due 🎉</div>');
 }
 function openCust(k){
  const g=CG[k];if(!g)return;
- const rem='Dear '+g.name+', your outstanding balance at RAASITH MOBILE is Rs. '+fm(g.due)+'. Please settle at your earliest convenience. Thank you.';
+ const rem=remText(g);
  show(`<div class="nm" style="font-size:17px">${esc(g.name)}</div><div class="mut">${esc(g.phone||'No phone')}</div>
  <div class="tot big" style="margin-top:8px"><span>Due</span><span class="out">${fm(g.due)}</span></div>
  ${g.bills.map(b=>`<div class="mut tot"><span>${esc(b.inv)} · ${new Date(b.t).toLocaleDateString()}</span><span>${fm(b.due)}</span></div>`).join('')}
